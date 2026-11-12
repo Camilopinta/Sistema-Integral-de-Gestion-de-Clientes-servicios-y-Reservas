@@ -635,3 +635,6 @@ class Reserva(EntidadBase):
             f"{self.servicio.nombre_servicio} | {self.estado.value} | {costo}"
         )
 
+222
+2222
+222
