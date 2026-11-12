@@ -296,3 +296,342 @@ class Servicio(EntidadBase, ABC):
             "id": self.identificador,
             "costo_base": self.costo_base,
         }
+
+# ============================================================================
+# Módulo integrado: modelos/reserva_sala.py
+# ============================================================================
+
+class ReservaSala(Servicio):
+    'Servicio especializado de reserva de salas; valida la cantidad de personas y la capacidad máxima.'
+    def __init__(self, identificador: str, costo_base: float, capacidad: int):
+        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+        super().__init__(identificador, "Reserva de sala", costo_base)
+        if isinstance(capacidad, bool) or not isinstance(capacidad, int) or capacidad <= 0:
+            raise ServicioInvalidoError("La capacidad de la sala debe ser un entero positivo.")
+        self._capacidad = capacidad
+
+    @property
+    def capacidad(self):
+        return self._capacidad
+
+    def validar_parametros(self, **kwargs):
+        'Valida los parámetros específicos que requiere este servicio.'
+        personas = kwargs.get("personas")
+        if isinstance(personas, bool) or not isinstance(personas, int) or personas <= 0:
+            raise ServicioInvalidoError("Debe indicar un número entero positivo de personas.")
+        if personas > self.capacidad:
+            raise DisponibilidadError(
+                f"La sala admite {self.capacidad} personas y se solicitaron {personas}."
+            )
+        return True
+
+    def _factor_cantidad(self, **kwargs):
+        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
+        return 1.0
+
+    def calcular_costo(
+        self, duracion: float, descuento: float = 0.0,
+        aplicar_impuesto: bool = True, **kwargs
+    ) -> float:
+        """Sobrescribe el cálculo para validar las personas de la sala."""
+        self.validar_parametros(**kwargs)
+        return super().calcular_costo(
+            duracion, descuento, aplicar_impuesto, **kwargs
+        )
+
+    def describir_servicio(self):
+        'Devuelve una descripción legible del servicio.'
+        return f"Sala {self.identificador}: capacidad máxima de {self.capacidad} personas."
+
+    def obtener_detalles(self) -> dict:
+        """Devuelve los datos del servicio de reserva de sala."""
+        return {
+            "tipo": "ReservaSala",
+            "id": self.identificador,
+            "nombre": self.nombre_servicio,
+            "costo_base": self.costo_base,
+            "capacidad": self.capacidad,
+        }
+    
+
+# ============================================================================
+# Módulo integrado: modelos/alquiler_equipo.py
+# ============================================================================
+
+class AlquilerEquipo(Servicio):
+    'Servicio especializado de alquiler de equipos; el precio depende de la duración y las unidades.'
+    def __init__(self, identificador: str, costo_base: float, tipo_equipo: str):
+        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+        super().__init__(identificador, "Alquiler de equipo", costo_base)
+        if not isinstance(tipo_equipo, str) or not tipo_equipo.strip():
+            raise ServicioInvalidoError("Debe especificar el tipo de equipo.")
+        self._tipo_equipo = tipo_equipo.strip()
+
+    @property
+    def tipo_equipo(self):
+        return self._tipo_equipo
+
+    def validar_parametros(self, **kwargs):
+        'Valida los parámetros específicos que requiere este servicio.'
+        unidades = kwargs.get("unidades")
+        if isinstance(unidades, bool) or not isinstance(unidades, int) or unidades <= 0:
+            raise ServicioInvalidoError("Las unidades deben ser un entero positivo.")
+        return True
+
+    def _factor_cantidad(self, **kwargs):
+        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
+        unidades = kwargs.get("unidades")
+        self.validar_parametros(unidades=unidades)
+        return float(unidades)
+
+    def calcular_costo(
+        self, duracion: float, descuento: float = 0.0,
+        aplicar_impuesto: bool = True, **kwargs
+    ) -> float:
+        """Sobrescribe el cálculo para validar las unidades de equipo."""
+        self.validar_parametros(**kwargs)
+        return super().calcular_costo(
+            duracion, descuento, aplicar_impuesto, **kwargs
+        )
+
+    def describir_servicio(self):
+        'Devuelve una descripción legible del servicio.'
+        return f"{self.tipo_equipo} (ID: {self.identificador}); tarifa por unidad y día."
+
+    def obtener_detalles(self) -> dict:
+        """Devuelve los datos del servicio de alquiler de equipo."""
+        return {
+            "tipo": "AlquilerEquipo",
+            "id": self.identificador,
+            "nombre": self.nombre_servicio,
+            "costo_base": self.costo_base,
+            "tipo_equipo": self.tipo_equipo,
+        }
+
+# ============================================================================
+# Módulo integrado: modelos/asesoria.py
+# ============================================================================
+"""Servicio especializado de asesoría con niveles tarifarios."""
+
+class AsesoriaEspecializada(Servicio):
+    # Claves normalizadas para aceptar variantes de acentos y mayúsculas.
+    'Servicio especializado de asesoría; aplica un factor de precio según el nivel seleccionado.'
+    NIVELES = {"Basico": 1.0, "Avanzado": 1.5, "Empresarial": 2.0}
+
+    def __init__(self, identificador: str, costo_base: float, area_experticia: str):
+        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+        super().__init__(identificador, "Asesoría especializada", costo_base)
+        if not isinstance(area_experticia, str) or not area_experticia.strip():
+            raise ServicioInvalidoError("Debe especificar el área de experticia.")
+        self._area_experticia = area_experticia.strip()
+
+    @property
+    def area_experticia(self) -> str:
+        return self._area_experticia
+
+    @classmethod
+    def _normalizar_nivel(cls, nivel) -> str:
+        'Normaliza el texto del nivel y comprueba que sea una opción permitida.'
+        if not isinstance(nivel, str):
+            raise ServicioInvalidoError("El nivel de asesoría debe ser texto.")
+        texto = unicodedata.normalize("NFD", nivel.strip())
+        texto = "".join(caracter for caracter in texto if unicodedata.category(caracter) != "Mn")
+        texto = texto.capitalize()
+        if texto not in cls.NIVELES:
+            raise ServicioInvalidoError(
+                f"Nivel inválido: {nivel}. Opciones: Básico, Avanzado o Empresarial."
+            )
+        return texto
+
+    def validar_parametros(self, **kwargs) -> bool:
+        'Valida los parámetros específicos que requiere este servicio.'
+        self._normalizar_nivel(kwargs.get("nivel", "Basico"))
+        return True
+
+    def _factor_cantidad(self, **kwargs) -> float:
+        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
+        nivel = self._normalizar_nivel(kwargs.get("nivel", "Basico"))
+        return self.NIVELES[nivel]
+
+    def calcular_costo(
+        self, duracion: float, descuento: float = 0.0,
+        aplicar_impuesto: bool = True, **kwargs
+    ) -> float:
+        """Sobrescribe el cálculo para validar el nivel de asesoría."""
+        self.validar_parametros(**kwargs)
+        return super().calcular_costo(
+            duracion, descuento, aplicar_impuesto, **kwargs
+        )
+
+    def describir_servicio(self) -> str:
+        'Devuelve una descripción legible del servicio.'
+        return f"Asesoría en {self.area_experticia} (ID: {self.identificador})."
+
+    def obtener_detalles(self) -> dict:
+        """Devuelve los datos del servicio de asesoría especializada."""
+        return {
+            "tipo": "AsesoriaEspecializada",
+            "id": self.identificador,
+            "nombre": self.nombre_servicio,
+            "costo_base": self.costo_base,
+            "area_experticia": self.area_experticia,
+        }
+
+
+# ============================================================================
+# Módulo integrado: modelos/reserva.py
+# ============================================================================
+"""Reserva con estados controlados y manejo avanzado de excepciones."""
+
+class EstadoReserva(Enum):
+    'Enumeración con los estados válidos que puede tener una reserva.'
+    PENDIENTE = "Pendiente"
+    CONFIRMADA = "Confirmada"
+    FALLIDA = "Fallida"
+    CANCELADA = "Cancelada"
+
+
+class Reserva(EntidadBase):
+    'Representa una reserva vinculada a un cliente y un servicio, con duración, parámetros, estado y costo.'
+    def __init__(
+        self, identificador, cliente, servicio, duracion,
+        parametros_servicio=None, descuento=0.0, aplicar_impuesto=True
+    ):
+        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+        try:
+            super().__init__(identificador)
+        except (ValueError, TypeError) as exc:
+            raise ReservaInvalidaError(
+                "El identificador de la reserva es obligatorio."
+            ) from exc
+
+        # Importaciones locales para evitar dependencias circulares.
+
+        if not isinstance(cliente, Cliente):
+            raise ReservaInvalidaError("La reserva debe asociarse a un Cliente válido.")
+        if not isinstance(servicio, Servicio):
+            raise ReservaInvalidaError("La reserva debe asociarse a un Servicio válido.")
+        if parametros_servicio is not None and not isinstance(parametros_servicio, dict):
+            raise ReservaInvalidaError("Los parámetros del servicio deben proporcionarse como diccionario.")
+
+        self._cliente = cliente
+        self._servicio = servicio
+        self._duracion = duracion
+        self._parametros_servicio = dict(parametros_servicio or {})
+        self._descuento = descuento
+        self._aplicar_impuesto = aplicar_impuesto
+        self._estado = EstadoReserva.PENDIENTE
+        self._costo_total = None
+
+    @property
+    def cliente(self):
+        return self._cliente
+
+    @property
+    def servicio(self):
+        return self._servicio
+
+    @property
+    def duracion(self):
+        return self._duracion
+
+    @property
+    def estado(self):
+        return self._estado
+
+    @property
+    def costo_total(self):
+        return self._costo_total
+
+    def confirmar(self):
+        'Valida y confirma una reserva pendiente; registra los errores y actualiza su estado.'
+        logging.info("Iniciando confirmación de reserva %s.", self.identificador)
+
+        # La validación de transición va fuera del bloque que marca FALLIDA.
+        # Así, un intento inválido no transforma por error una reserva cancelada.
+        if self.estado is not EstadoReserva.PENDIENTE:
+            mensaje = (
+                "Solo se puede confirmar una reserva pendiente. "
+                f"Estado actual: {self.estado.value}."
+            )
+            logging.warning("No se pudo confirmar la reserva %s: %s", self.identificador, mensaje)
+            raise ReservaInvalidaError(mensaje)
+
+        # try contiene las validaciones y cálculos que podrían generar excepciones.
+        try:
+            self.servicio.validar_parametros(**self._parametros_servicio)
+            costo = self.servicio.calcular_costo(
+                self.duracion,
+                descuento=self._descuento,
+                aplicar_impuesto=self._aplicar_impuesto,
+                **self._parametros_servicio
+            )
+        # Los errores conocidos se encadenan para conservar la causa original.
+        except SoftwareFJError as exc:
+            self._estado = EstadoReserva.FALLIDA
+            logging.exception("No se pudo confirmar la reserva %s.", self.identificador)
+            raise ReservaInvalidaError(
+                f"No se pudo confirmar la reserva {self.identificador}: {exc}"
+            ) from exc
+        except Exception as exc:
+            self._estado = EstadoReserva.FALLIDA
+            logging.exception("Error inesperado en reserva %s.", self.identificador)
+            raise ReservaInvalidaError(
+                f"Error inesperado al procesar la reserva {self.identificador}."
+            ) from exc
+        # else se ejecuta solamente si la validación y el cálculo terminaron bien.
+        else:
+            self._costo_total = costo
+            self._estado = EstadoReserva.CONFIRMADA
+            logging.info(
+                "Reserva %s confirmada. Total: %.2f.",
+                self.identificador, self._costo_total
+            )
+            return self._costo_total
+        # finally se ejecuta tanto si la operación termina bien como si falla.
+        finally:
+            logging.info(
+                "Finalizó confirmación de %s. Estado: %s.",
+                self.identificador, self.estado.value
+            )
+
+    def procesar(self):
+        """Procesa la reserva y devuelve el costo total al confirmarla.
+
+        Este método ofrece el punto de entrada explícito solicitado para
+        procesar una reserva y reutiliza las validaciones de confirmar().
+        """
+        logging.info("Procesando reserva %s.", self.identificador)
+        return self.confirmar()
+
+    def cancelar(self):
+        'Cancela una reserva confirmada; rechaza los demás estados.'
+        if self.estado is not EstadoReserva.CONFIRMADA:
+            mensaje = (
+                "Solo se puede cancelar una reserva confirmada. "
+                f"Estado actual: {self.estado.value}."
+            )
+            logging.warning("No se pudo cancelar la reserva %s: %s", self.identificador, mensaje)
+            raise ReservaInvalidaError(mensaje)
+        self._estado = EstadoReserva.CANCELADA
+        logging.info("Reserva %s cancelada.", self.identificador)
+
+    def obtener_detalles(self):
+        'Devuelve los datos principales del objeto en forma de diccionario.'
+        return {
+            "tipo": "Reserva",
+            "id": self.identificador,
+            "cliente": self.cliente.nombre,
+            "servicio": self.servicio.nombre_servicio,
+            "duracion": self.duracion,
+            "estado": self.estado.value,
+            "costo_total": self.costo_total,
+        }
+
+    def __str__(self):
+        costo = "Pendiente" if self.costo_total is None else f"${self.costo_total:,.2f}"
+        return (
+            f"{self.identificador} | {self.cliente.nombre} | "
+            f"{self.servicio.nombre_servicio} | {self.estado.value} | {costo}"
+        )
+
