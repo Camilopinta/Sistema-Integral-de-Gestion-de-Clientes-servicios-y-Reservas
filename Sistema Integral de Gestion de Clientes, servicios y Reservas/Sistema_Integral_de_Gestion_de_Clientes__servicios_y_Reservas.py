@@ -1,26 +1,19 @@
 # -*- coding: utf-8 -*-
+"""Software FJ: sistema integral de gestión de clientes, servicios y reservas.
+
+Versión de archivo único. Ejecutar interfaz: py SoftwareFJ_unico.py
+Ejecutar simulación: py SoftwareFJ_unico.py --simular
+No utiliza base de datos; la información de clientes, servicios y reservas vive en memoria.
 """
-Sistema Integral de Gesti�n de Clientes, Servicios y
-Reservas
-Curso: Programacion (213023) - Fase 4
-Grupo: 213023_359
-Fecha: Noviembre 2026
-"""
-# Módulos estándar para registrar eventos, abrir archivos y trabajar con rutas.
 import logging
-import os
-import subprocess
-# Herramientas para cálculos, validación de texto y normalización de acentos.
 import math
 import re
 import unicodedata
 import sys
-# Herramientas de programación orientada a objetos y anotaciones de tipos.
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
 from typing import overload, Any
-# Componentes para construir la interfaz gráfica de escritorio.
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -30,15 +23,7 @@ from tkinter import ttk, messagebox
 """Excepciones de dominio de Software FJ."""
 
 class SoftwareFJError(Exception):
-    """Excepción base del sistema; registra automáticamente errores de dominio."""
-
-    def __init__(self, mensaje="Se produjo un error en Software FJ"):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
-        super().__init__(mensaje)
-        # La configuración se inicializa en los puntos de entrada de la aplicación.
-        # Si ya está configurada, todo error de dominio queda registrado aquí,
-        # incluso cuando la excepción se origina fuera de la interfaz o simulación.
-        logging.error("%s: %s", self.__class__.__name__, mensaje)
+    """Excepción base del sistema."""
 
 class ClienteInvalidoError(SoftwareFJError):
     """Datos de cliente inválidos."""
@@ -61,17 +46,13 @@ class DuplicadoError(SoftwareFJError):
 class CalculoInvalidoError(SoftwareFJError):
     """No se pudo realizar un cálculo válido."""
 
-
 # ============================================================================
 # Módulo integrado: modelos/entidad_base.py
 # ============================================================================
 """Entidad abstracta común del sistema."""
 
-
 class EntidadBase(ABC):
-    'Clase abstracta base de las entidades del sistema. Valida el identificador y exige implementar obtener_detalles().'
     def __init__(self, identificador: str):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
         if not isinstance(identificador, str) or not identificador.strip():
             raise ValueError("El identificador no puede estar vacío.")
         self._identificador = identificador.strip()
@@ -84,16 +65,13 @@ class EntidadBase(ABC):
     def obtener_detalles(self) -> dict:
         """Devuelve los datos principales de la entidad."""
 
-
 # ============================================================================
 # Módulo integrado: modelos/cliente.py
 # ============================================================================
 """Modelo de cliente con encapsulación y validaciones."""
 
 class Cliente(EntidadBase):
-    'Representa un cliente y encapsula sus datos con propiedades que validan nombre, correo y teléfono.'
     def __init__(self, identificador: str, nombre: str, correo: str, telefono: str):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
         try:
             super().__init__(identificador)
         except (ValueError, TypeError) as exc:
@@ -139,7 +117,6 @@ class Cliente(EntidadBase):
         self._telefono = limpio
 
     def obtener_detalles(self):
-        'Devuelve los datos principales del objeto en forma de diccionario.'
         return {
             "tipo": "Cliente", "id": self.identificador,
             "nombre": self.nombre, "correo": self.correo,
@@ -161,7 +138,6 @@ class Servicio(EntidadBase, ABC):
     IMPUESTO = 0.19
 
     def __init__(self, identificador: str, nombre_servicio: str, costo_base: float):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
         try:
             super().__init__(identificador)
         except (ValueError, TypeError) as exc:
@@ -204,7 +180,9 @@ class Servicio(EntidadBase, ABC):
         """Calcula el factor de unidades o nivel específico del servicio."""
         raise NotImplementedError
 
-
+    # Python no implementa sobrecarga tradicional por firma en tiempo de ejecución.
+    # @overload documenta las formas válidas para analizadores de tipos; la
+    # implementación real acepta argumentos opcionales y parámetros específicos.
     @overload
     def calcular_costo(self, duracion: float, **kwargs: Any) -> float: ...
 
@@ -253,16 +231,13 @@ class Servicio(EntidadBase, ABC):
         if not math.isfinite(factor) or factor <= 0:
             raise CalculoInvalidoError("El factor de cantidad debe ser finito y positivo.")
 
-        # El subtotal bruto combina tarifa base, duración y factor propio del servicio.
         subtotal_bruto = self.costo_base * float(duracion) * float(factor)
         if not math.isfinite(subtotal_bruto) or subtotal_bruto < 0:
             raise CalculoInvalidoError("El subtotal calculado no es válido.")
         if descuento > subtotal_bruto:
             raise CalculoInvalidoError("El descuento no puede superar el subtotal.")
 
-        # El descuento se resta antes de calcular el impuesto.
         subtotal = subtotal_bruto - float(descuento)
-        # El impuesto se aplica únicamente si aplicar_impuesto es True.
         total = subtotal * (1 + self.IMPUESTO) if aplicar_impuesto else subtotal
         if not math.isfinite(total) or total < 0:
             raise CalculoInvalidoError("El cálculo produjo un resultado inconsistente.")
@@ -290,21 +265,17 @@ class Servicio(EntidadBase, ABC):
         return self.describir_servicio()
 
     def obtener_detalles(self) -> dict:
-        'Devuelve los datos principales del objeto en forma de diccionario.'
         return {
             "tipo": self.nombre_servicio,
             "id": self.identificador,
             "costo_base": self.costo_base,
         }
-
 # ============================================================================
 # Módulo integrado: modelos/reserva_sala.py
 # ============================================================================
 
 class ReservaSala(Servicio):
-    'Servicio especializado de reserva de salas; valida la cantidad de personas y la capacidad máxima.'
     def __init__(self, identificador: str, costo_base: float, capacidad: int):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
         super().__init__(identificador, "Reserva de sala", costo_base)
         if isinstance(capacidad, bool) or not isinstance(capacidad, int) or capacidad <= 0:
             raise ServicioInvalidoError("La capacidad de la sala debe ser un entero positivo.")
@@ -315,7 +286,6 @@ class ReservaSala(Servicio):
         return self._capacidad
 
     def validar_parametros(self, **kwargs):
-        'Valida los parámetros específicos que requiere este servicio.'
         personas = kwargs.get("personas")
         if isinstance(personas, bool) or not isinstance(personas, int) or personas <= 0:
             raise ServicioInvalidoError("Debe indicar un número entero positivo de personas.")
@@ -326,7 +296,6 @@ class ReservaSala(Servicio):
         return True
 
     def _factor_cantidad(self, **kwargs):
-        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
         return 1.0
 
     def calcular_costo(
@@ -340,7 +309,6 @@ class ReservaSala(Servicio):
         )
 
     def describir_servicio(self):
-        'Devuelve una descripción legible del servicio.'
         return f"Sala {self.identificador}: capacidad máxima de {self.capacidad} personas."
 
     def obtener_detalles(self) -> dict:
@@ -352,19 +320,15 @@ class ReservaSala(Servicio):
             "costo_base": self.costo_base,
             "capacidad": self.capacidad,
         }
-    
-
 # ============================================================================
 # Módulo integrado: modelos/alquiler_equipo.py
 # ============================================================================
 
 class AlquilerEquipo(Servicio):
-    'Servicio especializado de alquiler de equipos; el precio depende de la duración y las unidades.'
-    def __init__(self, identificador: str, costo_base: float, tipo_equipo: str):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+    def __init__(self, identificador: str, costo_base: float, tipo_equipo: str = "Equipo general"):
         super().__init__(identificador, "Alquiler de equipo", costo_base)
         if not isinstance(tipo_equipo, str) or not tipo_equipo.strip():
-            raise ServicioInvalidoError("Debe especificar el tipo de equipo.")
+            tipo_equipo = "Equipo general"
         self._tipo_equipo = tipo_equipo.strip()
 
     @property
@@ -372,14 +336,12 @@ class AlquilerEquipo(Servicio):
         return self._tipo_equipo
 
     def validar_parametros(self, **kwargs):
-        'Valida los parámetros específicos que requiere este servicio.'
         unidades = kwargs.get("unidades")
         if isinstance(unidades, bool) or not isinstance(unidades, int) or unidades <= 0:
             raise ServicioInvalidoError("Las unidades deben ser un entero positivo.")
         return True
 
     def _factor_cantidad(self, **kwargs):
-        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
         unidades = kwargs.get("unidades")
         self.validar_parametros(unidades=unidades)
         return float(unidades)
@@ -395,7 +357,6 @@ class AlquilerEquipo(Servicio):
         )
 
     def describir_servicio(self):
-        'Devuelve una descripción legible del servicio.'
         return f"{self.tipo_equipo} (ID: {self.identificador}); tarifa por unidad y día."
 
     def obtener_detalles(self) -> dict:
@@ -415,14 +376,12 @@ class AlquilerEquipo(Servicio):
 
 class AsesoriaEspecializada(Servicio):
     # Claves normalizadas para aceptar variantes de acentos y mayúsculas.
-    'Servicio especializado de asesoría; aplica un factor de precio según el nivel seleccionado.'
     NIVELES = {"Basico": 1.0, "Avanzado": 1.5, "Empresarial": 2.0}
 
-    def __init__(self, identificador: str, costo_base: float, area_experticia: str):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
+    def __init__(self, identificador: str, costo_base: float, area_experticia: str = "General"):
         super().__init__(identificador, "Asesoría especializada", costo_base)
         if not isinstance(area_experticia, str) or not area_experticia.strip():
-            raise ServicioInvalidoError("Debe especificar el área de experticia.")
+            area_experticia = "General"
         self._area_experticia = area_experticia.strip()
 
     @property
@@ -431,7 +390,6 @@ class AsesoriaEspecializada(Servicio):
 
     @classmethod
     def _normalizar_nivel(cls, nivel) -> str:
-        'Normaliza el texto del nivel y comprueba que sea una opción permitida.'
         if not isinstance(nivel, str):
             raise ServicioInvalidoError("El nivel de asesoría debe ser texto.")
         texto = unicodedata.normalize("NFD", nivel.strip())
@@ -444,12 +402,10 @@ class AsesoriaEspecializada(Servicio):
         return texto
 
     def validar_parametros(self, **kwargs) -> bool:
-        'Valida los parámetros específicos que requiere este servicio.'
         self._normalizar_nivel(kwargs.get("nivel", "Basico"))
         return True
 
     def _factor_cantidad(self, **kwargs) -> float:
-        'Calcula el multiplicador que depende de unidades o del nivel del servicio.'
         nivel = self._normalizar_nivel(kwargs.get("nivel", "Basico"))
         return self.NIVELES[nivel]
 
@@ -464,7 +420,6 @@ class AsesoriaEspecializada(Servicio):
         )
 
     def describir_servicio(self) -> str:
-        'Devuelve una descripción legible del servicio.'
         return f"Asesoría en {self.area_experticia} (ID: {self.identificador})."
 
     def obtener_detalles(self) -> dict:
@@ -476,15 +431,12 @@ class AsesoriaEspecializada(Servicio):
             "costo_base": self.costo_base,
             "area_experticia": self.area_experticia,
         }
-
-
 # ============================================================================
 # Módulo integrado: modelos/reserva.py
 # ============================================================================
 """Reserva con estados controlados y manejo avanzado de excepciones."""
 
 class EstadoReserva(Enum):
-    'Enumeración con los estados válidos que puede tener una reserva.'
     PENDIENTE = "Pendiente"
     CONFIRMADA = "Confirmada"
     FALLIDA = "Fallida"
@@ -492,12 +444,10 @@ class EstadoReserva(Enum):
 
 
 class Reserva(EntidadBase):
-    'Representa una reserva vinculada a un cliente y un servicio, con duración, parámetros, estado y costo.'
     def __init__(
         self, identificador, cliente, servicio, duracion,
         parametros_servicio=None, descuento=0.0, aplicar_impuesto=True
     ):
-        'Inicializa el objeto y valida o guarda sus datos iniciales.'
         try:
             super().__init__(identificador)
         except (ValueError, TypeError) as exc:
@@ -544,7 +494,6 @@ class Reserva(EntidadBase):
         return self._costo_total
 
     def confirmar(self):
-        'Valida y confirma una reserva pendiente; registra los errores y actualiza su estado.'
         logging.info("Iniciando confirmación de reserva %s.", self.identificador)
 
         # La validación de transición va fuera del bloque que marca FALLIDA.
@@ -557,7 +506,6 @@ class Reserva(EntidadBase):
             logging.warning("No se pudo confirmar la reserva %s: %s", self.identificador, mensaje)
             raise ReservaInvalidaError(mensaje)
 
-        # try contiene las validaciones y cálculos que podrían generar excepciones.
         try:
             self.servicio.validar_parametros(**self._parametros_servicio)
             costo = self.servicio.calcular_costo(
@@ -566,7 +514,6 @@ class Reserva(EntidadBase):
                 aplicar_impuesto=self._aplicar_impuesto,
                 **self._parametros_servicio
             )
-        # Los errores conocidos se encadenan para conservar la causa original.
         except SoftwareFJError as exc:
             self._estado = EstadoReserva.FALLIDA
             logging.exception("No se pudo confirmar la reserva %s.", self.identificador)
@@ -579,7 +526,6 @@ class Reserva(EntidadBase):
             raise ReservaInvalidaError(
                 f"Error inesperado al procesar la reserva {self.identificador}."
             ) from exc
-        # else se ejecuta solamente si la validación y el cálculo terminaron bien.
         else:
             self._costo_total = costo
             self._estado = EstadoReserva.CONFIRMADA
@@ -588,24 +534,13 @@ class Reserva(EntidadBase):
                 self.identificador, self._costo_total
             )
             return self._costo_total
-        # finally se ejecuta tanto si la operación termina bien como si falla.
         finally:
             logging.info(
                 "Finalizó confirmación de %s. Estado: %s.",
                 self.identificador, self.estado.value
             )
 
-    def procesar(self):
-        """Procesa la reserva y devuelve el costo total al confirmarla.
-
-        Este método ofrece el punto de entrada explícito solicitado para
-        procesar una reserva y reutiliza las validaciones de confirmar().
-        """
-        logging.info("Procesando reserva %s.", self.identificador)
-        return self.confirmar()
-
     def cancelar(self):
-        'Cancela una reserva confirmada; rechaza los demás estados.'
         if self.estado is not EstadoReserva.CONFIRMADA:
             mensaje = (
                 "Solo se puede cancelar una reserva confirmada. "
@@ -617,7 +552,6 @@ class Reserva(EntidadBase):
         logging.info("Reserva %s cancelada.", self.identificador)
 
     def obtener_detalles(self):
-        'Devuelve los datos principales del objeto en forma de diccionario.'
         return {
             "tipo": "Reserva",
             "id": self.identificador,
@@ -634,6 +568,106 @@ class Reserva(EntidadBase):
             f"{self.identificador} | {self.cliente.nombre} | "
             f"{self.servicio.nombre_servicio} | {self.estado.value} | {costo}"
         )
+
+# ============================================================================
+# Módulo integrado: servicios/gestor_sistema.py
+# ============================================================================
+"""Capa de gestión: administra listas internas y reglas del sistema."""
+
+class GestorSistema:
+    """Gestiona clientes, servicios y reservas sin utilizar una base de datos."""
+
+    def __init__(self):
+        self._clientes = []
+        self._servicios = []
+        self._reservas = []
+
+    @property
+    def clientes(self):
+        return tuple(self._clientes)
+
+    @property
+    def servicios(self):
+        return tuple(self._servicios)
+
+    @property
+    def reservas(self):
+        return tuple(self._reservas)
+
+    @staticmethod
+    def _validar_unico(lista, identificador, tipo):
+        if any(item.identificador.casefold() == identificador.casefold() for item in lista):
+            mensaje = f"Ya existe un {tipo} con identificador '{identificador}'."
+            logging.warning(mensaje)
+            raise DuplicadoError(mensaje)
+
+    @staticmethod
+    def _validar_tipo(objeto, clase_esperada, etiqueta):
+        if not isinstance(objeto, clase_esperada):
+            mensaje = f"Se esperaba un objeto {etiqueta}."
+            logging.warning(mensaje)
+            raise TypeError(mensaje)
+
+    def registrar_cliente(self, cliente: Cliente):
+        self._validar_tipo(cliente, Cliente, "Cliente")
+        self._validar_unico(self._clientes, cliente.identificador, "cliente")
+        self._clientes.append(cliente)
+        logging.info("Cliente registrado: %s.", cliente.identificador)
+        return cliente
+
+    def registrar_servicio(self, servicio: Servicio):
+        self._validar_tipo(servicio, Servicio, "Servicio")
+        self._validar_unico(self._servicios, servicio.identificador, "servicio")
+        self._servicios.append(servicio)
+        logging.info("Servicio registrado: %s.", servicio.identificador)
+        return servicio
+
+    def crear_reserva(self, reserva: Reserva):
+        self._validar_tipo(reserva, Reserva, "Reserva")
+        self._validar_unico(self._reservas, reserva.identificador, "reserva")
+
+        cliente_registrado = next(
+            (c for c in self._clientes if c is reserva.cliente), None
+        )
+        if cliente_registrado is None:
+            mensaje = "El cliente asociado a la reserva no está registrado en el sistema."
+            logging.warning(mensaje)
+            raise ElementoNoEncontradoError(mensaje)
+
+        servicio_registrado = next(
+            (s for s in self._servicios if s is reserva.servicio), None
+        )
+        if servicio_registrado is None:
+            mensaje = "El servicio asociado a la reserva no está registrado en el sistema."
+            logging.warning(mensaje)
+            raise ElementoNoEncontradoError(mensaje)
+
+        self._reservas.append(reserva)
+        logging.info("Reserva creada: %s.", reserva.identificador)
+        return reserva
+
+    @staticmethod
+    def _buscar_por_id(lista, identificador, tipo):
+        if not isinstance(identificador, str) or not identificador.strip():
+            mensaje = f"El identificador para buscar {tipo} debe ser texto no vacío."
+            logging.warning(mensaje)
+            raise ElementoNoEncontradoError(mensaje)
+        buscado = identificador.strip().casefold()
+        for elemento in lista:
+            if elemento.identificador.casefold() == buscado:
+                return elemento
+        mensaje = f"No existe el {tipo} '{identificador}'."
+        logging.warning(mensaje)
+        raise ElementoNoEncontradoError(mensaje)
+
+    def buscar_cliente(self, identificador):
+        return self._buscar_por_id(self._clientes, identificador, "cliente")
+
+    def buscar_servicio(self, identificador):
+        return self._buscar_por_id(self._servicios, identificador, "servicio")
+
+    def buscar_reserva(self, identificador):
+        return self._buscar_por_id(self._reservas, identificador, "reserva")
 
 
 # ============================================================================
@@ -1236,4 +1270,3 @@ if __name__ == "__main__":
         ejecutar_simulacion()
     else:
         iniciar_interfaz()
-
