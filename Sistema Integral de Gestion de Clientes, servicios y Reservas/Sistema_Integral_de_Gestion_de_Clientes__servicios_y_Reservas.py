@@ -635,3 +635,605 @@ class Reserva(EntidadBase):
             f"{self.servicio.nombre_servicio} | {self.estado.value} | {costo}"
         )
 
+
+# ============================================================================
+# Módulo integrado: utilidades/logging_config.py
+# ============================================================================
+"""Configuración centralizada de logs."""
+
+def configurar_logging():
+    carpeta = Path(__file__).resolve().parent / "logs"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    archivo = carpeta / "registro_eventos.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
+        handlers=[
+            logging.FileHandler(archivo, encoding="utf-8"),
+            logging.StreamHandler()
+        ],
+        force=True
+    )
+
+# ============================================================================
+# Módulo integrado: interfaz/ventana_principal.py
+# ============================================================================
+"""Interfaz gráfica con Tkinter; la lógica de negocio vive en GestorSistema."""
+
+class VentanaPrincipal:
+    def __init__(self, root, gestor):
+        self.root = root
+        self.gestor = gestor
+        root.title("Software FJ | Gestión de clientes, servicios y reservas")
+        root.geometry("1050x680")
+        root.minsize(900, 600)
+        self._crear_interfaz()
+        self._actualizar_tablas()
+
+    def _crear_interfaz(self):
+        encabezado = ttk.Frame(self.root, padding=12)
+        encabezado.pack(fill="x")
+        ttk.Label(encabezado, text="Software FJ", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(
+            encabezado,
+            text="Sistema integral de clientes, servicios y reservas (datos en memoria)"
+        ).pack(anchor="w")
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=8)
+
+        self.tab_clientes = ttk.Frame(self.notebook, padding=12)
+        self.tab_servicios = ttk.Frame(self.notebook, padding=12)
+        self.tab_reservas = ttk.Frame(self.notebook, padding=12)
+        self.tab_eventos = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.tab_clientes, text="Clientes")
+        self.notebook.add(self.tab_servicios, text="Servicios")
+        self.notebook.add(self.tab_reservas, text="Reservas")
+        self.notebook.add(self.tab_eventos, text="Ayuda y logs")
+
+        self._crear_tab_clientes()
+        self._crear_tab_servicios()
+        self._crear_tab_reservas()
+        self._crear_tab_eventos()
+
+    def _crear_tab_clientes(self):
+        form = ttk.LabelFrame(self.tab_clientes, text="Registrar cliente", padding=10)
+        form.pack(fill="x")
+        self.c_id = tk.StringVar()
+        self.c_nombre = tk.StringVar()
+        self.c_correo = tk.StringVar()
+        self.c_telefono = tk.StringVar()
+        campos = [("Identificador", self.c_id), ("Nombre", self.c_nombre),
+                  ("Correo", self.c_correo), ("Teléfono", self.c_telefono)]
+        for i, (texto, variable) in enumerate(campos):
+            ttk.Label(form, text=texto).grid(row=i // 2, column=(i % 2) * 2, sticky="w", padx=5, pady=5)
+            ttk.Entry(form, textvariable=variable, width=32).grid(
+                row=i // 2, column=(i % 2) * 2 + 1, sticky="ew", padx=5, pady=5
+            )
+        ttk.Button(form, text="Registrar cliente", command=self._registrar_cliente).grid(
+            row=2, column=0, columnspan=4, sticky="ew", padx=5, pady=6
+        )
+        self.tabla_clientes = self._crear_tabla(
+            self.tab_clientes, ("id", "nombre", "correo", "telefono"),
+            ("ID", "Nombre", "Correo", "Teléfono")
+        )
+
+    def _crear_tab_servicios(self):
+        form = ttk.LabelFrame(self.tab_servicios, text="Crear servicio", padding=10)
+        form.pack(fill="x")
+        self.s_id = tk.StringVar()
+        self.s_tipo = tk.StringVar(value="Sala")
+        self.s_costo = tk.StringVar()
+        self.s_extra = tk.StringVar()
+
+        ttk.Label(form, text="Identificador").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(form, textvariable=self.s_id, width=20).grid(row=0, column=1, padx=5, pady=5)
+        ttk.Label(form, text="Tipo").grid(row=0, column=2, sticky="w", padx=5, pady=5)
+        selector_tipo = ttk.Combobox(
+            form, textvariable=self.s_tipo, state="readonly",
+            values=("Sala", "Equipo", "Asesoría"), width=18
+        )
+        selector_tipo.grid(row=0, column=3, padx=5, pady=5)
+        ttk.Label(form, text="Costo base").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(form, textvariable=self.s_costo, width=20).grid(row=1, column=1, padx=5, pady=5)
+
+        self.s_extra_label = ttk.Label(form, text="Capacidad de personas")
+        self.s_extra_entry = ttk.Entry(form, textvariable=self.s_extra, width=25)
+        self.s_extra_label.grid(row=1, column=2, sticky="w", padx=5, pady=5)
+        self.s_extra_entry.grid(row=1, column=3, padx=5, pady=5)
+        selector_tipo.bind("<<ComboboxSelected>>", self._actualizar_campos_servicio)
+
+        ttk.Button(form, text="Crear servicio", command=self._crear_servicio).grid(
+            row=3, column=0, columnspan=4, sticky="ew", padx=5, pady=6
+        )
+        self.tabla_servicios = self._crear_tabla(
+            self.tab_servicios, ("id", "tipo", "costo", "descripcion"),
+            ("ID", "Tipo", "Costo base", "Descripción")
+        )
+        self._actualizar_campos_servicio()
+
+    def _actualizar_campos_servicio(self, *_):
+        """Muestra capacidad únicamente cuando el tipo de servicio es Sala."""
+        if self.s_tipo.get() == "Sala":
+            self.s_extra_label.configure(text="Capacidad de personas")
+            self.s_extra_label.grid()
+            self.s_extra_entry.grid()
+        else:
+            self.s_extra_label.grid_remove()
+            self.s_extra_entry.grid_remove()
+            self.s_extra.set("")
+
+    def _crear_tab_reservas(self):
+        form = ttk.LabelFrame(self.tab_reservas, text="Gestión de reservas", padding=10)
+        form.pack(fill="x")
+        self.r_id = tk.StringVar()
+        self.r_cliente = tk.StringVar()
+        self.r_servicio = tk.StringVar()
+        self.r_duracion = tk.StringVar(value="1")
+        self.r_parametro = tk.StringVar(value="1")
+        self.r_descuento = tk.StringVar(value="0")
+        self.r_impuesto = tk.BooleanVar(value=True)
+        campos = [
+            ("ID reserva", self.r_id), ("ID cliente", self.r_cliente),
+            ("ID servicio", self.r_servicio), ("Duración (horas/días)", self.r_duracion),
+            ("Descuento ($)", self.r_descuento)
+        ]
+        for i, (texto, variable) in enumerate(campos):
+            fila, col = divmod(i, 2)
+            ttk.Label(form, text=texto).grid(row=fila, column=col * 2, sticky="w", padx=5, pady=4)
+            ttk.Entry(form, textvariable=variable, width=27).grid(
+                row=fila, column=col * 2 + 1, sticky="ew", padx=5, pady=4
+            )
+
+        self.r_parametro_label = ttk.Label(form, text="Parámetro (personas/unidades)")
+        self.r_parametro_label.grid(row=2, column=0, sticky="w", padx=5, pady=4)
+        self.r_parametro_entry = ttk.Entry(form, textvariable=self.r_parametro, width=27)
+        self.r_parametro_combo = ttk.Combobox(
+            form, textvariable=self.r_parametro, state="readonly",
+            values=("Básico", "Avanzado", "Empresarial"), width=24
+        )
+        self.r_parametro_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+
+        self.r_servicio.trace_add("write", self._actualizar_parametro_segun_servicio)
+        ttk.Checkbutton(form, text="Aplicar impuesto (19 %)", variable=self.r_impuesto).grid(
+            row=3, column=0, columnspan=2, sticky="w", padx=5, pady=4
+        )
+        botones = ttk.Frame(form)
+        botones.grid(row=3, column=2, columnspan=2, sticky="ew", padx=5, pady=4)
+        ttk.Button(botones, text="Crear reserva", command=self._crear_reserva).pack(side="left", padx=3)
+        ttk.Button(botones, text="Confirmar seleccionada", command=self._confirmar_reserva).pack(side="left", padx=3)
+        ttk.Button(botones, text="Cancelar seleccionada", command=self._cancelar_reserva).pack(side="left", padx=3)
+        ttk.Button(botones, text="Actualizar", command=self._actualizar_tablas).pack(side="left", padx=3)
+        self.tabla_reservas = self._crear_tabla(
+            self.tab_reservas, ("id", "cliente", "servicio", "duracion", "estado", "costo"),
+            ("ID", "Cliente", "Servicio", "Duración", "Estado", "Total")
+        )
+        ttk.Label(
+            self.tab_reservas,
+            text="Sala: número de personas | Equipo: número de unidades | Asesoría: seleccione Básico, Avanzado o Empresarial."
+        ).pack(anchor="w", pady=5)
+
+    def _actualizar_parametro_segun_servicio(self, *_):
+        """Adapta el campo parámetro al tipo de servicio seleccionado."""
+        identificador = self.r_servicio.get().strip().casefold()
+        servicio = next(
+            (item for item in self.gestor.servicios
+             if item.identificador.casefold() == identificador),
+            None,
+        )
+        if isinstance(servicio, AsesoriaEspecializada):
+            self.r_parametro_label.configure(text="Nivel de asesoría")
+            self.r_parametro_entry.grid_remove()
+            self.r_parametro_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+            if self.r_parametro.get() not in ("Básico", "Avanzado", "Empresarial"):
+                self.r_parametro.set("Básico")
+        else:
+            self.r_parametro_combo.grid_remove()
+            self.r_parametro_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+            if isinstance(servicio, ReservaSala):
+                self.r_parametro_label.configure(text="Número de personas")
+            elif isinstance(servicio, AlquilerEquipo):
+                self.r_parametro_label.configure(text="Número de unidades")
+            else:
+                self.r_parametro_label.configure(text="Parámetro (personas/unidades)")
+            if self.r_parametro.get() in ("Básico", "Avanzado", "Empresarial"):
+                self.r_parametro.set("1")
+
+    def _crear_tab_eventos(self):
+        """Construye la sección de ayuda, simulación y administración de logs."""
+        marco_simulacion = ttk.LabelFrame(
+            self.tab_eventos, text="Simulación del sistema", padding=10
+        )
+        marco_simulacion.pack(fill="x", pady=5)
+        ttk.Button(
+            marco_simulacion,
+            text="Ejecutar simulación de 16 operaciones",
+            command=self._ejecutar_simulacion_interfaz
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            marco_simulacion,
+            text="Limpiar resultados",
+            command=self._limpiar_resultados_simulacion
+        ).pack(side="left", padx=5)
+
+        marco_logs = ttk.LabelFrame(
+            self.tab_eventos, text="Administración de logs", padding=10
+        )
+        marco_logs.pack(fill="x", pady=5)
+        ttk.Button(
+            marco_logs, text="Generar log", command=self._generar_log
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            marco_logs, text="Abrir archivo log", command=self._mostrar_log
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            marco_logs, text="Mostrar ubicación", command=self._mostrar_ubicacion_log
+        ).pack(side="left", padx=5)
+
+        marco_resultados = ttk.LabelFrame(
+            self.tab_eventos, text="Resultados de la simulación", padding=10
+        )
+        marco_resultados.pack(fill="both", expand=True, pady=8)
+        self.txt_resultados = tk.Text(
+            marco_resultados, height=14, wrap="word",
+            font=("Consolas", 9), state="disabled"
+        )
+        self.txt_resultados.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(
+            marco_resultados, orient="vertical", command=self.txt_resultados.yview
+        )
+        scrollbar.pack(side="right", fill="y")
+        self.txt_resultados.configure(yscrollcommand=scrollbar.set)
+
+        ttk.Label(
+            self.tab_eventos,
+            text="Para pruebas automatizadas ejecute: py -m unittest discover -s pruebas"
+        ).pack(anchor="w", pady=5)
+
+    def _ruta_log(self):
+        return Path(__file__).resolve().parent / "logs" / "registro_eventos.log"
+
+    def _agregar_resultado_simulacion(self, mensaje):
+        self.txt_resultados.configure(state="normal")
+        self.txt_resultados.insert("end", str(mensaje) + "\n")
+        self.txt_resultados.see("end")
+        self.txt_resultados.configure(state="disabled")
+
+    def _limpiar_resultados_simulacion(self):
+        self.txt_resultados.configure(state="normal")
+        self.txt_resultados.delete("1.0", "end")
+        self.txt_resultados.configure(state="disabled")
+
+    def _ejecutar_simulacion_interfaz(self):
+        self._limpiar_resultados_simulacion()
+        self._agregar_resultado_simulacion("=" * 72)
+        self._agregar_resultado_simulacion("INICIANDO SIMULACIÓN DEL SOFTWARE FJ")
+        self._agregar_resultado_simulacion("=" * 72)
+        try:
+            ejecutar_simulacion(
+                gestor=self.gestor,
+                salida=self._agregar_resultado_simulacion,
+                configurar=False
+            )
+            self._agregar_resultado_simulacion("\nSIMULACIÓN FINALIZADA.")
+            self._agregar_resultado_simulacion(f"Archivo de registros: {self._ruta_log()}")
+            messagebox.showinfo(
+                "Simulación finalizada",
+                "La simulación de 16 operaciones terminó.\n\n"
+                "Puede consultar los resultados en esta pestaña y el detalle en el archivo de logs."
+            )
+        except Exception as exc:
+            logging.exception("Error al ejecutar la simulación desde la interfaz.")
+            self._agregar_resultado_simulacion(f"ERROR GENERAL: {exc}")
+            messagebox.showerror("Error de simulación", str(exc))
+
+    def _generar_log(self):
+        try:
+            ruta = self._ruta_log()
+            ruta.parent.mkdir(parents=True, exist_ok=True)
+            if not ruta.exists():
+                ruta.touch(encoding="utf-8")
+            logging.info("Archivo de log consultado desde la interfaz.")
+            messagebox.showinfo("Archivo de logs", f"Archivo disponible en:\n{ruta}")
+        except OSError as exc:
+            messagebox.showerror("Error", f"No fue posible generar el archivo de log:\n{exc}")
+
+    def _mostrar_ubicacion_log(self):
+        messagebox.showinfo("Ubicación del log", str(self._ruta_log()))
+
+    def _crear_tabla(self, parent, columnas, encabezados):
+        frame = ttk.Frame(parent)
+        frame.pack(fill="both", expand=True, pady=10)
+        tree = ttk.Treeview(frame, columns=columnas, show="headings", height=12)
+        for col, texto in zip(columnas, encabezados):
+            tree.heading(col, text=texto)
+            tree.column(col, width=140, anchor="w")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        return tree
+
+    def _ejecutar_seguro(self, accion):
+        try:
+            accion()
+            self._actualizar_tablas()
+        except SoftwareFJError as exc:
+            logging.warning("Operación rechazada desde interfaz: %s", exc)
+            messagebox.showwarning("No se pudo completar", str(exc))
+        except (ValueError, TypeError) as exc:
+            logging.exception("Datos ingresados inválidos.")
+            messagebox.showwarning("Datos inválidos", str(exc))
+        except Exception:
+            logging.exception("Error inesperado desde la interfaz.")
+            messagebox.showerror(
+                "Error inesperado",
+                "La operación no se completó. Consulte logs/registro_eventos.log."
+            )
+
+    def _registrar_cliente(self):
+        def accion():
+            cliente = Cliente(
+                self.c_id.get(), self.c_nombre.get(),
+                self.c_correo.get(), self.c_telefono.get()
+            )
+            self.gestor.registrar_cliente(cliente)
+            messagebox.showinfo("Software FJ", f"Cliente {cliente.nombre} registrado.")
+        self._ejecutar_seguro(accion)
+
+    def _crear_servicio(self):
+        def accion():
+            identificador = self.s_id.get()
+            costo = float(self.s_costo.get())
+            tipo = self.s_tipo.get()
+            if tipo == "Sala":
+                capacidad = int(self.s_extra.get())
+                servicio = ReservaSala(identificador, costo, capacidad)
+            elif tipo == "Equipo":
+                servicio = AlquilerEquipo(identificador, costo)
+            else:
+                servicio = AsesoriaEspecializada(identificador, costo)
+            self.gestor.registrar_servicio(servicio)
+            messagebox.showinfo("Software FJ", f"Servicio creado: {servicio.describir_servicio()}")
+        self._ejecutar_seguro(accion)
+
+    def _crear_reserva(self):
+        """Registra una reserva nueva y la deja en estado Pendiente."""
+        def accion():
+            cliente = self.gestor.buscar_cliente(self.r_cliente.get().strip())
+            servicio = self.gestor.buscar_servicio(self.r_servicio.get().strip())
+            duracion = float(self.r_duracion.get())
+            descuento = float(self.r_descuento.get())
+            parametro = self.r_parametro.get().strip()
+            if isinstance(servicio, ReservaSala):
+                parametros = {"personas": int(parametro)}
+            elif isinstance(servicio, AlquilerEquipo):
+                parametros = {"unidades": int(parametro)}
+            elif isinstance(servicio, AsesoriaEspecializada):
+                parametros = {"nivel": parametro or "Básico"}
+            else:
+                parametros = {}
+            reserva = Reserva(
+                self.r_id.get().strip(), cliente, servicio, duracion,
+                parametros_servicio=parametros,
+                descuento=descuento,
+                aplicar_impuesto=self.r_impuesto.get()
+            )
+            self.gestor.crear_reserva(reserva)
+            messagebox.showinfo(
+                "Reserva creada",
+                f"La reserva {reserva.identificador} fue creada correctamente.\nEstado: Pendiente.\n\nPara procesarla, selecciónela y pulse 'Confirmar seleccionada'."
+            )
+        self._ejecutar_seguro(accion)
+
+    def _confirmar_reserva(self):
+        """Confirma únicamente la reserva pendiente seleccionada en la tabla."""
+        seleccion = self.tabla_reservas.selection()
+        if not seleccion:
+            messagebox.showinfo("Seleccionar reserva", "Seleccione una reserva pendiente en la tabla.")
+            return
+        identificador = self.tabla_reservas.item(seleccion[0], "values")[0]
+
+        def accion():
+            reserva = self.gestor.buscar_reserva(identificador)
+            total = reserva.confirmar()
+            messagebox.showinfo(
+                "Reserva confirmada",
+                f"Reserva {identificador} confirmada correctamente.\nTotal: ${total:,.2f}"
+            )
+        self._ejecutar_seguro(accion)
+
+    def _cancelar_reserva(self):
+        seleccion = self.tabla_reservas.selection()
+        if not seleccion:
+            messagebox.showinfo("Seleccionar reserva", "Seleccione una reserva en la tabla.")
+            return
+        identificador = self.tabla_reservas.item(seleccion[0], "values")[0]
+        def accion():
+            reserva = self.gestor.buscar_reserva(identificador)
+            reserva.cancelar()
+            messagebox.showinfo("Software FJ", f"Reserva {identificador} cancelada.")
+        self._ejecutar_seguro(accion)
+
+    def _actualizar_tablas(self):
+        for tabla in (getattr(self, "tabla_clientes", None),
+                      getattr(self, "tabla_servicios", None),
+                      getattr(self, "tabla_reservas", None)):
+            if tabla is not None:
+                for item in tabla.get_children():
+                    tabla.delete(item)
+        if hasattr(self, "tabla_clientes"):
+            for c in self.gestor.clientes:
+                self.tabla_clientes.insert("", "end", values=(c.identificador, c.nombre, c.correo, c.telefono))
+        if hasattr(self, "tabla_servicios"):
+            for s in self.gestor.servicios:
+                self.tabla_servicios.insert(
+                    "", "end",
+                    values=(s.identificador, s.nombre_servicio, f"${s.costo_base:,.2f}", s.describir_servicio())
+                )
+        if hasattr(self, "tabla_reservas"):
+            for r in self.gestor.reservas:
+                costo = "-" if r.costo_total is None else f"${r.costo_total:,.2f}"
+                self.tabla_reservas.insert(
+                    "", "end",
+                    values=(r.identificador, r.cliente.nombre, r.servicio.nombre_servicio,
+                            r.duracion, r.estado.value, costo)
+                )
+
+    def _mostrar_log(self):
+        """Abre el archivo de logs con la aplicación predeterminada del sistema."""
+        ruta = self._ruta_log()
+        if not ruta.exists():
+            messagebox.showinfo(
+                "Archivo de logs",
+                "Todavía no existe el archivo. Ejecute una operación o pulse Generar log."
+            )
+            return
+        try:
+            import os
+            import subprocess
+            import platform
+            sistema = platform.system()
+            if sistema == "Windows":
+                os.startfile(str(ruta))
+            elif sistema == "Darwin":
+                subprocess.Popen(["open", str(ruta)])
+            else:
+                subprocess.Popen(["xdg-open", str(ruta)])
+        except Exception as exc:
+            logging.exception("No fue posible abrir el archivo de logs.")
+            messagebox.showerror("No se pudo abrir", f"Abra el archivo manualmente:\n{ruta}\n\n{exc}")
+
+
+# ============================================================================
+# Simulación
+# ============================================================================
+"""Simulación de operaciones válidas e inválidas para evidenciar el manejo de excepciones."""
+
+def intentar(etiqueta, funcion, salida=None):
+    """Ejecuta un escenario y envía su resultado a consola o a la interfaz."""
+    mostrar = salida if salida is not None else print
+    mostrar(f"\n{etiqueta}")
+    try:
+        resultado = funcion()
+    except SoftwareFJError as exc:
+        logging.warning("%s: %s", etiqueta, exc)
+        mostrar(f"ERROR CONTROLADO: {exc}")
+    except Exception as exc:
+        logging.exception("Error inesperado durante %s", etiqueta)
+        mostrar(f"ERROR INESPERADO: {exc}")
+    else:
+        logging.info("%s. Resultado: %s", etiqueta, resultado)
+        mostrar(f"RESULTADO EXITOSO: {resultado}")
+    finally:
+        mostrar("Operación finalizada.")
+        mostrar("-" * 65)
+
+
+def ejecutar_simulacion(gestor=None, salida=None, configurar=True):
+    """Revisa 16 aspectos usando exclusivamente los datos reales del GestorSistema.
+
+    No crea registros de prueba, no elimina información y no modifica reservas.
+    Si no se proporciona un gestor (ejecución independiente por consola), se
+    utiliza uno vacío y se informa que no hay información registrada.
+    """
+    if configurar:
+        configurar_logging()
+
+    mostrar = salida if salida is not None else print
+    g = gestor if gestor is not None else GestorSistema()
+
+    def exigir_registros(registros, tipo):
+        if not registros:
+            raise ElementoNoEncontradoError(
+                f"No se encuentra información de {tipo}. Registre al menos uno para realizar esta validación."
+            )
+        return registros
+
+    def validar_identificadores_unicos(registros, tipo):
+        ids = [item.identificador.casefold() for item in registros]
+        if len(ids) != len(set(ids)):
+            raise DuplicadoError(f"Se encontraron identificadores duplicados en {tipo}.")
+        return f"Los {tipo} tienen identificadores únicos ({len(ids)} registros)."
+
+    def validar_relaciones_reservas():
+        reservas = exigir_registros(g.reservas, "reservas")
+        clientes = {id(item) for item in g.clientes}
+        servicios = {id(item) for item in g.servicios}
+        inconsistentes = [
+            r.identificador for r in reservas
+            if id(r.cliente) not in clientes or id(r.servicio) not in servicios
+        ]
+        if inconsistentes:
+            raise ElementoNoEncontradoError(
+                "Hay reservas asociadas a clientes o servicios que no están registrados: "
+                + ", ".join(inconsistentes)
+            )
+        return f"Las {len(reservas)} reservas están asociadas a clientes y servicios registrados."
+
+    def resumen_reservas(estado=None):
+        reservas = exigir_registros(g.reservas, "reservas")
+        if estado is None:
+            return f"Total de reservas registradas: {len(reservas)}."
+        cantidad = sum(1 for r in reservas if r.estado is estado)
+        return f"Reservas en estado {estado.value}: {cantidad}."
+
+    escenarios = [
+        ("1. Comprobar existencia de clientes", lambda: f"Clientes encontrados: {len(exigir_registros(g.clientes, 'clientes'))}."),
+        ("2. Consultar clientes registrados", lambda: " | ".join(str(c) for c in exigir_registros(g.clientes, 'clientes'))),
+        ("3. Validar identificadores de clientes", lambda: validar_identificadores_unicos(g.clientes, "clientes")),
+        ("4. Consultar primer cliente registrado", lambda: exigir_registros(g.clientes, "clientes")[0].obtener_detalles()),
+        ("5. Comprobar existencia de servicios", lambda: f"Servicios encontrados: {len(exigir_registros(g.servicios, 'servicios'))}."),
+        ("6. Consultar servicios registrados", lambda: " | ".join(s.describir_servicio() for s in exigir_registros(g.servicios, 'servicios'))),
+        ("7. Validar identificadores de servicios", lambda: validar_identificadores_unicos(g.servicios, "servicios")),
+        ("8. Consultar primer servicio registrado", lambda: exigir_registros(g.servicios, "servicios")[0].obtener_detalles()),
+        ("9. Comprobar existencia de reservas", lambda: f"Reservas encontradas: {len(exigir_registros(g.reservas, 'reservas'))}."),
+        ("10. Consultar reservas registradas", lambda: " | ".join(str(r) for r in exigir_registros(g.reservas, 'reservas'))),
+        ("11. Consultar detalles de la primera reserva", lambda: exigir_registros(g.reservas, "reservas")[0].obtener_detalles()),
+        ("12. Validar asociaciones de reservas", validar_relaciones_reservas),
+        ("13. Resumen general de clientes", lambda: f"Total de clientes registrados: {len(exigir_registros(g.clientes, 'clientes'))}."),
+        ("14. Resumen general de servicios", lambda: f"Total de servicios registrados: {len(exigir_registros(g.servicios, 'servicios'))}."),
+        ("15. Resumen de reservas pendientes", lambda: resumen_reservas(EstadoReserva.PENDIENTE)),
+        ("16. Resumen general de reservas", lambda: resumen_reservas()),
+    ]
+
+    mostrar("=" * 72)
+    mostrar("REVISIÓN DE 16 OPERACIONES - DATOS REALES DE SOFTWARE FJ")
+    mostrar("No se crearán ni modificarán registros durante esta revisión.")
+    mostrar("=" * 72)
+    mostrar(f"Registros actuales: {len(g.clientes)} clientes | {len(g.servicios)} servicios | {len(g.reservas)} reservas.")
+
+    for etiqueta, funcion in escenarios:
+        intentar(etiqueta, funcion, mostrar)
+
+    mostrar("\nREVISIÓN DE LAS 16 OPERACIONES FINALIZADA.")
+    mostrar("Los registros originales de la aplicación no fueron modificados.")
+    mostrar(f"Archivo de registros: {Path(__file__).resolve().parent / 'logs' / 'registro_eventos.log'}")
+    logging.info("Revisión de 16 operaciones sobre datos reales finalizada.")
+
+# ============================================================================
+# Inicio de la aplicación
+# ============================================================================
+def iniciar_interfaz():
+    configurar_logging()
+    gestor = GestorSistema()
+    root = tk.Tk()
+    try:
+        VentanaPrincipal(root, gestor)
+        root.mainloop()
+    except SoftwareFJError as exc:
+        logging.exception("Error controlado al iniciar la aplicación")
+        messagebox.showerror("Software FJ", str(exc))
+    except Exception:
+        logging.exception("Error inesperado al iniciar la aplicación")
+        messagebox.showerror(
+            "Error inesperado",
+            "No fue posible iniciar la aplicación. Revise logs/registro_eventos.log."
+        )
+
+if __name__ == "__main__":
+    if "--simular" in sys.argv:
+        ejecutar_simulacion()
+    else:
+        iniciar_interfaz()
+
