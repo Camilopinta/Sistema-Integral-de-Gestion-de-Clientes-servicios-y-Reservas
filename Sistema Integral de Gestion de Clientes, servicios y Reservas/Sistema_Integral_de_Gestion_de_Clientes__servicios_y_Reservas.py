@@ -1138,3 +1138,136 @@ class VentanaPrincipal:
         except Exception as exc:
             logging.exception("No fue posible abrir el archivo de logs.")
             messagebox.showerror("No se pudo abrir", f"Abra el archivo manualmente:\n{ruta}\n\n{exc}")
+
+# ============================================================================
+# Simulación
+# ============================================================================
+"""Simulación de operaciones válidas e inválidas para evidenciar el manejo de excepciones."""
+
+def intentar(etiqueta, funcion, salida=None):
+    """Ejecuta un escenario y envía su resultado a consola o a la interfaz."""
+    mostrar = salida if salida is not None else print
+    mostrar(f"\n{etiqueta}")
+    try:
+        resultado = funcion()
+    except SoftwareFJError as exc:
+        logging.warning("%s: %s", etiqueta, exc)
+        mostrar(f"ERROR CONTROLADO: {exc}")
+    except Exception as exc:
+        logging.exception("Error inesperado durante %s", etiqueta)
+        mostrar(f"ERROR INESPERADO: {exc}")
+    else:
+        logging.info("%s. Resultado: %s", etiqueta, resultado)
+        mostrar(f"RESULTADO EXITOSO: {resultado}")
+    finally:
+        mostrar("Operación finalizada.")
+        mostrar("-" * 65)
+
+
+def ejecutar_simulacion(gestor=None, salida=None, configurar=True):
+    """Revisa 16 aspectos usando exclusivamente los datos reales del GestorSistema.
+
+    No crea registros de prueba, no elimina información y no modifica reservas.
+    Si no se proporciona un gestor (ejecución independiente por consola), se
+    utiliza uno vacío y se informa que no hay información registrada.
+    """
+    if configurar:
+        configurar_logging()
+
+    mostrar = salida if salida is not None else print
+    g = gestor if gestor is not None else GestorSistema()
+
+    def exigir_registros(registros, tipo):
+        if not registros:
+            raise ElementoNoEncontradoError(
+                f"No se encuentra información de {tipo}. Registre al menos uno para realizar esta validación."
+            )
+        return registros
+
+    def validar_identificadores_unicos(registros, tipo):
+        ids = [item.identificador.casefold() for item in registros]
+        if len(ids) != len(set(ids)):
+            raise DuplicadoError(f"Se encontraron identificadores duplicados en {tipo}.")
+        return f"Los {tipo} tienen identificadores únicos ({len(ids)} registros)."
+
+    def validar_relaciones_reservas():
+        reservas = exigir_registros(g.reservas, "reservas")
+        clientes = {id(item) for item in g.clientes}
+        servicios = {id(item) for item in g.servicios}
+        inconsistentes = [
+            r.identificador for r in reservas
+            if id(r.cliente) not in clientes or id(r.servicio) not in servicios
+        ]
+        if inconsistentes:
+            raise ElementoNoEncontradoError(
+                "Hay reservas asociadas a clientes o servicios que no están registrados: "
+                + ", ".join(inconsistentes)
+            )
+        return f"Las {len(reservas)} reservas están asociadas a clientes y servicios registrados."
+
+    def resumen_reservas(estado=None):
+        reservas = exigir_registros(g.reservas, "reservas")
+        if estado is None:
+            return f"Total de reservas registradas: {len(reservas)}."
+        cantidad = sum(1 for r in reservas if r.estado is estado)
+        return f"Reservas en estado {estado.value}: {cantidad}."
+
+    escenarios = [
+        ("1. Comprobar existencia de clientes", lambda: f"Clientes encontrados: {len(exigir_registros(g.clientes, 'clientes'))}."),
+        ("2. Consultar clientes registrados", lambda: " | ".join(str(c) for c in exigir_registros(g.clientes, 'clientes'))),
+        ("3. Validar identificadores de clientes", lambda: validar_identificadores_unicos(g.clientes, "clientes")),
+        ("4. Consultar primer cliente registrado", lambda: exigir_registros(g.clientes, "clientes")[0].obtener_detalles()),
+        ("5. Comprobar existencia de servicios", lambda: f"Servicios encontrados: {len(exigir_registros(g.servicios, 'servicios'))}."),
+        ("6. Consultar servicios registrados", lambda: " | ".join(s.describir_servicio() for s in exigir_registros(g.servicios, 'servicios'))),
+        ("7. Validar identificadores de servicios", lambda: validar_identificadores_unicos(g.servicios, "servicios")),
+        ("8. Consultar primer servicio registrado", lambda: exigir_registros(g.servicios, "servicios")[0].obtener_detalles()),
+        ("9. Comprobar existencia de reservas", lambda: f"Reservas encontradas: {len(exigir_registros(g.reservas, 'reservas'))}."),
+        ("10. Consultar reservas registradas", lambda: " | ".join(str(r) for r in exigir_registros(g.reservas, 'reservas'))),
+        ("11. Consultar detalles de la primera reserva", lambda: exigir_registros(g.reservas, "reservas")[0].obtener_detalles()),
+        ("12. Validar asociaciones de reservas", validar_relaciones_reservas),
+        ("13. Resumen general de clientes", lambda: f"Total de clientes registrados: {len(exigir_registros(g.clientes, 'clientes'))}."),
+        ("14. Resumen general de servicios", lambda: f"Total de servicios registrados: {len(exigir_registros(g.servicios, 'servicios'))}."),
+        ("15. Resumen de reservas pendientes", lambda: resumen_reservas(EstadoReserva.PENDIENTE)),
+        ("16. Resumen general de reservas", lambda: resumen_reservas()),
+    ]
+
+    mostrar("=" * 72)
+    mostrar("REVISIÓN DE 16 OPERACIONES - DATOS REALES DE SOFTWARE FJ")
+    mostrar("No se crearán ni modificarán registros durante esta revisión.")
+    mostrar("=" * 72)
+    mostrar(f"Registros actuales: {len(g.clientes)} clientes | {len(g.servicios)} servicios | {len(g.reservas)} reservas.")
+
+    for etiqueta, funcion in escenarios:
+        intentar(etiqueta, funcion, mostrar)
+
+    mostrar("\nREVISIÓN DE LAS 16 OPERACIONES FINALIZADA.")
+    mostrar("Los registros originales de la aplicación no fueron modificados.")
+    mostrar(f"Archivo de registros: {Path(__file__).resolve().parent / 'logs' / 'registro_eventos.log'}")
+    logging.info("Revisión de 16 operaciones sobre datos reales finalizada.")
+
+# ============================================================================
+# Inicio de la aplicación
+# ============================================================================
+def iniciar_interfaz():
+    configurar_logging()
+    gestor = GestorSistema()
+    root = tk.Tk()
+    try:
+        VentanaPrincipal(root, gestor)
+        root.mainloop()
+    except SoftwareFJError as exc:
+        logging.exception("Error controlado al iniciar la aplicación")
+        messagebox.showerror("Software FJ", str(exc))
+    except Exception:
+        logging.exception("Error inesperado al iniciar la aplicación")
+        messagebox.showerror(
+            "Error inesperado",
+            "No fue posible iniciar la aplicación. Revise logs/registro_eventos.log."
+        )
+
+if __name__ == "__main__":
+    if "--simular" in sys.argv:
+        ejecutar_simulacion()
+    else:
+        iniciar_interfaz()
+# aporte al trabajo 
