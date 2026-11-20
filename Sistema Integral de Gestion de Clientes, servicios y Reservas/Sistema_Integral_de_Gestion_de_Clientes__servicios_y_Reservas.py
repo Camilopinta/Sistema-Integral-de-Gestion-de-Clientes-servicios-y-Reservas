@@ -1264,6 +1264,565 @@ def iniciar_interfaz():
             "Error inesperado",
             "No fue posible iniciar la aplicación. Revise logs/registro_eventos.log."
         )
+============================================================================
+
+import pickle
+from tkinter import simpledialog
+
+_ARCHIVO_DATOS = Path(__file__).resolve().parent / "software_fj_datos.pkl"
+
+
+def _guardar_datos(gestor):
+    """Guarda los registros para conservarlos al cerrar la aplicación."""
+    try:
+        datos = {
+            "clientes": gestor._clientes,
+            "servicios": gestor._servicios,
+            "reservas": gestor._reservas,
+        }
+        temporal = _ARCHIVO_DATOS.with_suffix(".tmp")
+        with temporal.open("wb") as archivo:
+            pickle.dump(datos, archivo, protocol=pickle.HIGHEST_PROTOCOL)
+        temporal.replace(_ARCHIVO_DATOS)
+    except Exception:
+        logging.exception("No fue posible guardar los datos de Software FJ.")
+        raise
+
+
+# Se conserva el constructor original y se añade la recuperación de información.
+_gestor_init_original = GestorSistema.__init__
+
+def _gestor_init_ampliado(self):
+    _gestor_init_original(self)
+    if _ARCHIVO_DATOS.exists():
+        try:
+            with _ARCHIVO_DATOS.open("rb") as archivo:
+                datos = pickle.load(archivo)
+            self._clientes = datos.get("clientes", [])
+            self._servicios = datos.get("servicios", [])
+            self._reservas = datos.get("reservas", [])
+            logging.info("Datos persistentes cargados correctamente.")
+        except Exception:
+            logging.exception("No se pudieron recuperar los datos guardados.")
+            messagebox.showwarning(
+                "Recuperación de datos",
+                "No fue posible leer el archivo de datos. Se iniciará una sesión vacía."
+            )
+
+GestorSistema.__init__ = _gestor_init_ampliado
+
+# Guardado automático al registrar nuevas entidades.
+_registrar_cliente_original = GestorSistema.registrar_cliente
+def _registrar_cliente_persistente(self, cliente):
+    resultado = _registrar_cliente_original(self, cliente)
+    _guardar_datos(self)
+    return resultado
+GestorSistema.registrar_cliente = _registrar_cliente_persistente
+
+_registrar_servicio_original = GestorSistema.registrar_servicio
+def _registrar_servicio_persistente(self, servicio):
+    resultado = _registrar_servicio_original(self, servicio)
+    _guardar_datos(self)
+    return resultado
+GestorSistema.registrar_servicio = _registrar_servicio_persistente
+
+_crear_reserva_original = GestorSistema.crear_reserva
+def _crear_reserva_persistente(self, reserva):
+    resultado = _crear_reserva_original(self, reserva)
+    _guardar_datos(self)
+    return resultado
+GestorSistema.crear_reserva = _crear_reserva_persistente
+
+# También se persisten los cambios de estado de las reservas.
+_confirmar_original = Reserva.confirmar
+def _confirmar_persistente(self):
+    resultado = _confirmar_original(self)
+    return resultado
+Reserva.confirmar = _confirmar_persistente
+
+_cancelar_original = Reserva.cancelar
+def _cancelar_persistente(self):
+    resultado = _cancelar_original(self)
+    return resultado
+
+
+# Métodos auxiliares de edición y eliminación para la ventana.
+def _seleccion_id(tabla):
+    seleccion = tabla.selection()
+    if not seleccion:
+        return None
+    valores = tabla.item(seleccion[0], "values")
+    return str(valores[0]) if valores else None
+
+
+def _buscar_en_lista(lista, identificador):
+    return next(
+        (obj for obj in lista
+         if obj.identificador.casefold() == str(identificador).casefold()),
+        None
+    )
+
+
+def _actualizar_combos(self):
+    """Sincroniza los selectores con los clientes y servicios registrados."""
+    clientes = [f"{c.identificador} | {c.nombre}" for c in self.gestor.clientes]
+    servicios = [f"{s.identificador} | {s.nombre_servicio}" for s in self.gestor.servicios]
+
+    if hasattr(self, "combo_cliente_reserva"):
+        self.combo_cliente_reserva["values"] = clientes
+        actual = self.r_cliente.get()
+        if actual and not any(x.startswith(actual.split(" | ")[0] + " |") for x in clientes):
+            self.r_cliente.set("")
+    if hasattr(self, "combo_servicio_reserva"):
+        self.combo_servicio_reserva["values"] = servicios
+        actual = self.r_servicio.get()
+        if actual and not any(x.startswith(actual.split(" | ")[0] + " |") for x in servicios):
+            self.r_servicio.set("")
+
+
+def _id_desde_combo(valor):
+    return valor.split(" | ", 1)[0].strip() if " | " in valor else valor.strip()
+
+
+def _seleccionar_cliente_para_editar(self):
+    identificador = _seleccion_id(self.tabla_clientes)
+    if not identificador:
+        messagebox.showinfo("Editar cliente", "Seleccione un cliente de la tabla.")
+        return
+    cliente = self.gestor.buscar_cliente(identificador)
+    self.c_id.set(cliente.identificador)
+    self.c_nombre.set(cliente.nombre)
+    self.c_correo.set(cliente.correo)
+    self.c_telefono.set(cliente.telefono)
+    self._cliente_edicion_id = cliente.identificador
+    messagebox.showinfo("Edición de cliente", "Modifique los campos y pulse «Guardar cambios».")
+
+
+def _guardar_cambios_cliente(self):
+    identificador = getattr(self, "_cliente_edicion_id", None)
+    if not identificador:
+        messagebox.showinfo("Editar cliente", "Primero seleccione un cliente y pulse «Editar».")
+        return
+    try:
+        cliente = self.gestor.buscar_cliente(identificador)
+        cliente.nombre = self.c_nombre.get()
+        cliente.correo = self.c_correo.get()
+        cliente.telefono = self.c_telefono.get()
+        _guardar_datos(self.gestor)
+        self._cliente_edicion_id = None
+        self._actualizar_tablas()
+        messagebox.showinfo("Software FJ", "Los datos del cliente fueron actualizados.")
+    except Exception as exc:
+        messagebox.showerror("No se pudo actualizar", str(exc))
+
+
+def _eliminar_cliente(self):
+    identificador = _seleccion_id(self.tabla_clientes)
+    if not identificador:
+        messagebox.showinfo("Eliminar cliente", "Seleccione un cliente de la tabla.")
+        return
+    cliente = self.gestor.buscar_cliente(identificador)
+    relacionados = [r for r in self.gestor.reservas if r.cliente is cliente]
+    if relacionados:
+        messagebox.showwarning(
+            "No se puede eliminar",
+            "Este cliente tiene reservas asociadas. Elimine primero esas reservas "
+            "si realmente desea retirar el cliente."
+        )
+        return
+    if messagebox.askyesno("Confirmar eliminación", f"¿Desea eliminar al cliente {cliente.nombre}?"):
+        self.gestor._clientes.remove(cliente)
+        _guardar_datos(self.gestor)
+        self._actualizar_tablas()
+        _actualizar_combos(self)
+        messagebox.showinfo("Software FJ", "Cliente eliminado correctamente.")
+
+
+def _seleccionar_servicio_para_editar(self):
+    identificador = _seleccion_id(self.tabla_servicios)
+    if not identificador:
+        messagebox.showinfo("Editar servicio", "Seleccione un servicio de la tabla.")
+        return
+    servicio = self.gestor.buscar_servicio(identificador)
+    self.s_id.set(servicio.identificador)
+    self.s_costo.set(str(servicio.costo_base))
+    if isinstance(servicio, ReservaSala):
+        self.s_tipo.set("Sala")
+        self.s_extra.set(str(servicio.capacidad))
+    elif isinstance(servicio, AlquilerEquipo):
+        self.s_tipo.set("Equipo")
+        self.s_extra.set(servicio.tipo_equipo)
+    else:
+        self.s_tipo.set("Asesoría")
+        self.s_extra.set(servicio.area_experticia)
+    self._actualizar_campos_servicio()
+    self._servicio_edicion_id = servicio.identificador
+    messagebox.showinfo("Edición de servicio", "Modifique los campos y pulse «Guardar cambios».")
+
+
+def _guardar_cambios_servicio(self):
+    identificador = getattr(self, "_servicio_edicion_id", None)
+    if not identificador:
+        messagebox.showinfo("Editar servicio", "Primero seleccione un servicio y pulse «Editar».")
+        return
+    try:
+        anterior = self.gestor.buscar_servicio(identificador)
+        costo = float(self.s_costo.get())
+        tipo = self.s_tipo.get()
+        if tipo == "Sala":
+            nuevo = ReservaSala(identificador, costo, int(self.s_extra.get()))
+        elif tipo == "Equipo":
+            nuevo = AlquilerEquipo(identificador, costo, self.s_extra.get() or "Equipo general")
+        else:
+            nuevo = AsesoriaEspecializada(identificador, costo, self.s_extra.get() or "General")
+
+        indice = self.gestor._servicios.index(anterior)
+        self.gestor._servicios[indice] = nuevo
+        # Mantiene enlazadas las reservas con el servicio actualizado.
+        for reserva in self.gestor._reservas:
+            if reserva.servicio is anterior:
+                reserva._servicio = nuevo
+        _guardar_datos(self.gestor)
+        self._servicio_edicion_id = None
+        self._actualizar_tablas()
+        _actualizar_combos(self)
+        messagebox.showinfo("Software FJ", "El servicio y sus relaciones fueron actualizados.")
+    except Exception as exc:
+        messagebox.showerror("No se pudo actualizar", str(exc))
+
+
+def _eliminar_servicio(self):
+    identificador = _seleccion_id(self.tabla_servicios)
+    if not identificador:
+        messagebox.showinfo("Eliminar servicio", "Seleccione un servicio de la tabla.")
+        return
+    servicio = self.gestor.buscar_servicio(identificador)
+    relacionados = [r for r in self.gestor.reservas if r.servicio is servicio]
+    if relacionados:
+        messagebox.showwarning(
+            "No se puede eliminar",
+            "Este servicio está asociado a una o más reservas. Elimine primero "
+            "las reservas relacionadas para conservar la integridad de los datos."
+        )
+        return
+    if messagebox.askyesno("Confirmar eliminación", f"¿Desea eliminar {servicio.nombre_servicio}?"):
+        self.gestor._servicios.remove(servicio)
+        _guardar_datos(self.gestor)
+        self._actualizar_tablas()
+        _actualizar_combos(self)
+        messagebox.showinfo("Software FJ", "Servicio eliminado correctamente.")
+
+
+def _seleccionar_reserva_para_editar(self):
+    identificador = _seleccion_id(self.tabla_reservas)
+    if not identificador:
+        messagebox.showinfo("Editar reserva", "Seleccione una reserva de la tabla.")
+        return
+    reserva = self.gestor.buscar_reserva(identificador)
+    if reserva.estado is not EstadoReserva.PENDIENTE:
+        messagebox.showwarning(
+            "Edición no permitida",
+            "Solo se pueden modificar reservas que todavía estén pendientes."
+        )
+        return
+    self.r_id.set(reserva.identificador)
+    self.r_cliente.set(f"{reserva.cliente.identificador} | {reserva.cliente.nombre}")
+    self.r_servicio.set(f"{reserva.servicio.identificador} | {reserva.servicio.nombre_servicio}")
+    self.r_duracion.set(str(reserva.duracion))
+    self.r_descuento.set(str(reserva._descuento))
+    self.r_impuesto.set(reserva._aplicar_impuesto)
+    if isinstance(reserva.servicio, ReservaSala):
+        self.r_parametro.set(str(reserva._parametros_servicio.get("personas", 1)))
+    elif isinstance(reserva.servicio, AlquilerEquipo):
+        self.r_parametro.set(str(reserva._parametros_servicio.get("unidades", 1)))
+    else:
+        self.r_parametro.set(reserva._parametros_servicio.get("nivel", "Básico"))
+    self._actualizar_parametro_segun_servicio()
+    self._reserva_edicion_id = reserva.identificador
+    messagebox.showinfo("Edición de reserva", "Modifique los datos y pulse «Guardar cambios».")
+
+
+def _guardar_cambios_reserva(self):
+    identificador = getattr(self, "_reserva_edicion_id", None)
+    if not identificador:
+        messagebox.showinfo("Editar reserva", "Primero seleccione una reserva y pulse «Editar».")
+        return
+    try:
+        reserva = self.gestor.buscar_reserva(identificador)
+        if reserva.estado is not EstadoReserva.PENDIENTE:
+            raise ReservaInvalidaError("Solo se pueden modificar reservas pendientes.")
+        cliente = self.gestor.buscar_cliente(_id_desde_combo(self.r_cliente.get()))
+        servicio = self.gestor.buscar_servicio(_id_desde_combo(self.r_servicio.get()))
+        parametro = self.r_parametro.get().strip()
+        if isinstance(servicio, ReservaSala):
+            parametros = {"personas": int(parametro)}
+        elif isinstance(servicio, AlquilerEquipo):
+            parametros = {"unidades": int(parametro)}
+        else:
+            parametros = {"nivel": parametro or "Básico"}
+        servicio.validar_parametros(**parametros)
+        reserva._cliente = cliente
+        reserva._servicio = servicio
+        reserva._duracion = float(self.r_duracion.get())
+        reserva._descuento = float(self.r_descuento.get())
+        reserva._aplicar_impuesto = self.r_impuesto.get()
+        reserva._parametros_servicio = parametros
+        reserva._costo_total = None
+        _guardar_datos(self.gestor)
+        self._reserva_edicion_id = None
+        self._actualizar_tablas()
+        messagebox.showinfo("Software FJ", "La reserva pendiente fue modificada correctamente.")
+    except Exception as exc:
+        messagebox.showerror("No se pudo actualizar", str(exc))
+
+
+def _eliminar_reserva(self):
+    identificador = _seleccion_id(self.tabla_reservas)
+    if not identificador:
+        messagebox.showinfo("Eliminar reserva", "Seleccione una reserva de la tabla.")
+        return
+    reserva = self.gestor.buscar_reserva(identificador)
+    if not messagebox.askyesno(
+        "Confirmar eliminación",
+        f"¿Eliminar definitivamente la reserva {identificador}?"
+    ):
+        return
+    self.gestor._reservas.remove(reserva)
+    _guardar_datos(self.gestor)
+    self._actualizar_tablas()
+    messagebox.showinfo("Software FJ", "Reserva eliminada correctamente.")
+
+
+# Se agregan los métodos a la ventana original, sin reescribirla.
+VentanaPrincipal._seleccionar_cliente_para_editar = _seleccionar_cliente_para_editar
+VentanaPrincipal._guardar_cambios_cliente = _guardar_cambios_cliente
+VentanaPrincipal._eliminar_cliente = _eliminar_cliente
+VentanaPrincipal._seleccionar_servicio_para_editar = _seleccionar_servicio_para_editar
+VentanaPrincipal._guardar_cambios_servicio = _guardar_cambios_servicio
+VentanaPrincipal._eliminar_servicio = _eliminar_servicio
+VentanaPrincipal._seleccionar_reserva_para_editar = _seleccionar_reserva_para_editar
+VentanaPrincipal._guardar_cambios_reserva = _guardar_cambios_reserva
+VentanaPrincipal._eliminar_reserva = _eliminar_reserva
+
+# La actualización original de tablas se conserva y se complementa con combos.
+_actualizar_tablas_original = VentanaPrincipal._actualizar_tablas
+def _actualizar_tablas_ampliado(self):
+    _actualizar_tablas_original(self)
+    _actualizar_combos(self)
+VentanaPrincipal._actualizar_tablas = _actualizar_tablas_ampliado
+
+# La creación original de la interfaz se conserva. Después se sustituyen
+# los campos de ID de reserva por listas desplegables relacionadas.
+_ventana_init_original = VentanaPrincipal.__init__
+def _ventana_init_ampliado(self, root, gestor):
+    _ventana_init_original(self, root, gestor)
+    self._cliente_edicion_id = None
+    self._servicio_edicion_id = None
+    self._reserva_edicion_id = None
+
+    formulario = next(
+        (w for w in self.tab_reservas.winfo_children()
+         if isinstance(w, ttk.LabelFrame)),
+        None
+    )
+    if formulario:
+        for widget in list(formulario.winfo_children()):
+            variable = str(widget.cget("textvariable")) if isinstance(widget, ttk.Entry) else ""
+            if variable == str(self.r_cliente):
+                info = widget.grid_info()
+                widget.destroy()
+                info.pop("in", None)
+                self.combo_cliente_reserva = ttk.Combobox(
+                    formulario, textvariable=self.r_cliente, state="readonly", width=25
+                )
+                self.combo_cliente_reserva.grid(**info)
+            elif variable == str(self.r_servicio):
+                info = widget.grid_info()
+                widget.destroy()
+                info.pop("in", None)
+                self.combo_servicio_reserva = ttk.Combobox(
+                    formulario, textvariable=self.r_servicio, state="readonly", width=25
+                )
+                self.combo_servicio_reserva.grid(**info)
+
+    # Barras de acciones separadas para no alterar los formularios originales.
+    barra_clientes = ttk.Frame(self.tab_clientes)
+    barra_clientes.pack(fill="x", pady=(0, 5))
+    ttk.Button(barra_clientes, text="Editar seleccionado",
+               command=self._seleccionar_cliente_para_editar).pack(side="left", padx=3)
+    ttk.Button(barra_clientes, text="Guardar cambios",
+               command=self._guardar_cambios_cliente).pack(side="left", padx=3)
+    ttk.Button(barra_clientes, text="Eliminar seleccionado",
+               command=self._eliminar_cliente).pack(side="left", padx=3)
+
+    barra_servicios = ttk.Frame(self.tab_servicios)
+    barra_servicios.pack(fill="x", pady=(0, 5))
+    ttk.Button(barra_servicios, text="Editar seleccionado",
+               command=self._seleccionar_servicio_para_editar).pack(side="left", padx=3)
+    ttk.Button(barra_servicios, text="Guardar cambios",
+               command=self._guardar_cambios_servicio).pack(side="left", padx=3)
+    ttk.Button(barra_servicios, text="Eliminar seleccionado",
+               command=self._eliminar_servicio).pack(side="left", padx=3)
+
+    barra_reservas = ttk.Frame(self.tab_reservas)
+    barra_reservas.pack(fill="x", pady=(0, 5))
+    ttk.Button(barra_reservas, text="Editar seleccionada",
+               command=self._seleccionar_reserva_para_editar).pack(side="left", padx=3)
+    ttk.Button(barra_reservas, text="Guardar cambios",
+               command=self._guardar_cambios_reserva).pack(side="left", padx=3)
+    ttk.Button(barra_reservas, text="Eliminar seleccionada",
+               command=self._eliminar_reserva).pack(side="left", padx=3)
+
+    self._actualizar_tablas()
+
+VentanaPrincipal.__init__ = _ventana_init_ampliado
+
+# Reemplaza la transición cancelar para que guarde el estado actualizado.
+Reserva.cancelar = _cancelar_persistente
+
+# Persiste los cambios de estado efectuados desde los botones de la interfaz.
+_confirmar_reserva_ui_original = VentanaPrincipal._confirmar_reserva
+def _confirmar_reserva_ui_ampliada(self):
+    _confirmar_reserva_ui_original(self)
+    _guardar_datos(self.gestor)
+VentanaPrincipal._confirmar_reserva = _confirmar_reserva_ui_ampliada
+
+_cancelar_reserva_ui_original = VentanaPrincipal._cancelar_reserva
+def _cancelar_reserva_ui_ampliada(self):
+    _cancelar_reserva_ui_original(self)
+    _guardar_datos(self.gestor)
+VentanaPrincipal._cancelar_reserva = _cancelar_reserva_ui_ampliada
+
+
+
+
+
+# Adaptación de compatibilidad: los desplegables muestran "ID | nombre",
+# pero la lógica original continúa recibiendo únicamente el identificador.
+def _actualizar_parametro_combo(self, *_):
+    identificador = _id_desde_combo(self.r_servicio.get()).casefold()
+    servicio = next(
+        (item for item in self.gestor.servicios
+         if item.identificador.casefold() == identificador),
+        None
+    )
+    if isinstance(servicio, AsesoriaEspecializada):
+        self.r_parametro_label.configure(text="Nivel de asesoría")
+        self.r_parametro_entry.grid_remove()
+        self.r_parametro_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+        if self.r_parametro.get() not in ("Básico", "Avanzado", "Empresarial"):
+            self.r_parametro.set("Básico")
+    else:
+        self.r_parametro_combo.grid_remove()
+        self.r_parametro_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+        if isinstance(servicio, ReservaSala):
+            self.r_parametro_label.configure(text="Número de personas")
+        elif isinstance(servicio, AlquilerEquipo):
+            self.r_parametro_label.configure(text="Número de unidades")
+        else:
+            self.r_parametro_label.configure(text="Parámetro (personas/unidades)")
+        if self.r_parametro.get() in ("Básico", "Avanzado", "Empresarial"):
+            self.r_parametro.set("1")
+
+VentanaPrincipal._actualizar_parametro_segun_servicio = _actualizar_parametro_combo
+
+_crear_reserva_original_combo = VentanaPrincipal._crear_reserva
+def _crear_reserva_desde_combos(self):
+    cliente_visible = self.r_cliente.get()
+    servicio_visible = self.r_servicio.get()
+    self.r_cliente.set(_id_desde_combo(cliente_visible))
+    self.r_servicio.set(_id_desde_combo(servicio_visible))
+    try:
+        _crear_reserva_original_combo(self)
+    finally:
+        self.r_cliente.set(cliente_visible)
+        self.r_servicio.set(servicio_visible)
+        _actualizar_combos(self)
+
+VentanaPrincipal._crear_reserva = _crear_reserva_desde_combos
+
+
+
+
+# ============================================================================
+# CORRECCIONES DE INTERFAZ E INTEGRACIÓN (versión revisada)
+# ============================================================================
+# Los botones de gestión se ubican antes de las tablas para que no queden
+# ocultos por el contenedor expandible del Treeview.
+_ventana_init_revision_anterior = VentanaPrincipal.__init__
+def _ventana_init_revision(self, root, gestor):
+    _ventana_init_revision_anterior(self, root, gestor)
+
+    # Reordenar las barras de edición/eliminación por encima de cada tabla.
+    for tab, atributo in (
+        (self.tab_clientes, '_barra_clientes'),
+        (self.tab_servicios, '_barra_servicios'),
+        (self.tab_reservas, '_barra_reservas'),
+    ):
+        barra = next((w for w in tab.winfo_children()
+                      if isinstance(w, ttk.Frame)
+                      and any(isinstance(x, ttk.Button) for x in w.winfo_children())
+                      and w is not getattr(self, '_tabla_frame_' + atributo, None)), None)
+        tabla = {
+            self.tab_clientes: self.tabla_clientes,
+            self.tab_servicios: self.tabla_servicios,
+            self.tab_reservas: self.tabla_reservas,
+        }[tab]
+        contenedor_tabla = tabla.master
+        if barra is not None:
+            barra.pack_forget()
+            barra.pack(fill='x', pady=(0, 6), before=contenedor_tabla)
+
+    # El selector de servicio debe reaccionar al formato "ID | nombre".
+    self.r_servicio.trace_add('write', self._actualizar_parametro_segun_servicio)
+    _actualizar_combos(self)
+    self._actualizar_parametro_segun_servicio()
+
+VentanaPrincipal.__init__ = _ventana_init_revision
+
+# Corrección del selector dinámico: utiliza el identificador que contiene
+# el desplegable y muestra el control adecuado para cada clase de servicio.
+def _actualizar_parametro_revision(self, *_):
+    identificador = _id_desde_combo(self.r_servicio.get()).casefold()
+    servicio = next((x for x in self.gestor.servicios
+                     if x.identificador.casefold() == identificador), None)
+    if isinstance(servicio, AsesoriaEspecializada):
+        self.r_parametro_label.configure(text='Nivel de asesoría')
+        self.r_parametro_entry.grid_remove()
+        self.r_parametro_combo.grid(row=2, column=1, sticky='ew', padx=5, pady=4)
+        if self.r_parametro.get() not in ('Básico', 'Avanzado', 'Empresarial'):
+            self.r_parametro.set('Básico')
+    else:
+        self.r_parametro_combo.grid_remove()
+        self.r_parametro_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=4)
+        if isinstance(servicio, ReservaSala):
+            self.r_parametro_label.configure(text='Número de personas')
+        elif isinstance(servicio, AlquilerEquipo):
+            self.r_parametro_label.configure(text='Número de unidades')
+        else:
+            self.r_parametro_label.configure(text='Parámetro (personas/unidades)')
+        if self.r_parametro.get() in ('Básico', 'Avanzado', 'Empresarial'):
+            self.r_parametro.set('1')
+
+VentanaPrincipal._actualizar_parametro_segun_servicio = _actualizar_parametro_revision
+
+# La selección de servicio también actualiza el parámetro de la reserva.
+# Se agrega un evento explícito para evitar depender únicamente del trace.
+
+def _crear_combo_servicio_evento(self):
+    if hasattr(self, 'combo_servicio_reserva'):
+        self.combo_servicio_reserva.bind(
+            '<<ComboboxSelected>>', self._actualizar_parametro_segun_servicio
+        )
+
+_ventana_init_revision_final_anterior = VentanaPrincipal.__init__
+def _ventana_init_revision_final(self, root, gestor):
+    _ventana_init_revision_final_anterior(self, root, gestor)
+    _crear_combo_servicio_evento(self)
+    _actualizar_combos(self)
+    self._actualizar_parametro_segun_servicio()
+
+VentanaPrincipal.__init__ = _ventana_init_revision_final
 
 if __name__ == "__main__":
     if "--simular" in sys.argv:
